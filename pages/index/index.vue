@@ -703,11 +703,9 @@ function tapBeast() {
   position: relative;
 }
 .lottery-container {
-  // width: 100vw; 
   max-width: 750rpx;
-  min-height: 100vh;
   background: linear-gradient(to bottom, #ffcb05 0%, #fdf6e0 30%, #fff 100%);
-  padding: 120rpx 30rpx 200rpx 30rpx;
+  padding: 120rpx 30rpx 20rpx 30rpx;
   color: #333;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   display: flex;
