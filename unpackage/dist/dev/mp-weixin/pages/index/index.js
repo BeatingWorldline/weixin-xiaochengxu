@@ -5,6 +5,8 @@ if (!Array) {
   const _component_van_loading = common_vendor.resolveComponent("van-loading");
   _component_van_loading();
 }
+const guaranteeTarget = 30;
+const cooldownEnabled = false;
 const _sfc_defineComponent = common_vendor.defineComponent({
   __name: "index",
   setup(__props) {
@@ -27,6 +29,14 @@ const _sfc_defineComponent = common_vendor.defineComponent({
     const luckTexts = common_vendor.ref([]);
     const luckCount = common_vendor.ref(0);
     let luckTextId = 0;
+    const guaranteeProgress = common_vendor.ref(0);
+    let countdownTimer = null;
+    const guaranteeReady = common_vendor.computed(() => guaranteeProgress.value >= guaranteeTarget);
+    const guaranteePercent = common_vendor.computed(() => Math.min(guaranteeProgress.value / guaranteeTarget, 1));
+    const guaranteeRingBg = common_vendor.computed(() => {
+      const activeColor = guaranteeReady.value ? "#ffe37a" : "#ff7a45";
+      return `conic-gradient(${activeColor} ${guaranteePercent.value * 360}deg, rgba(255,255,255,0.25) 0deg)`;
+    });
     const prizes = common_vendor.ref([
       { icon: "🍱", name: "5元盒饭加餐", type: "cash5" },
       { icon: "😭", name: "再接再励", type: "paid" },
@@ -57,40 +67,60 @@ const _sfc_defineComponent = common_vendor.defineComponent({
     common_vendor.onShareAppMessage(() => {
       return {
         title: "抽奖赢免单",
-        path: "/pages/index/inde",
+        path: "/pages/index/index",
         imageUrl: "https://imgs.3dmgame.com/community/402ee1ae5daf455c99eb3c31c3c14f7d11762507624256.png"
       };
     });
     function checkLotteryStatus() {
       try {
-        const today = formatDate(/* @__PURE__ */ new Date());
-        const lotteryData = common_vendor.index.getStorageSync("lottery_data");
-        if (lotteryData) {
-          const data = JSON.parse(lotteryData);
-          if (data.date !== today) {
-            resetDailyData();
-            return;
-          }
-          todayResults.value = data.results || [];
-          if (data.lastDrawTime) {
-            const lastDrawTime = new Date(data.lastDrawTime);
-            const timeDiff = (/* @__PURE__ */ new Date()).getTime() - lastDrawTime.getTime();
-            const fourHours = 4 * 60 * 60 * 1e3;
-            if (timeDiff < fourHours) {
-              canDraw.value = false;
-              remainingTimes.value = 0;
-              nextDrawTime.value = new Date(lastDrawTime.getTime() + fourHours);
-            } else {
-              canDraw.value = true;
-              remainingTimes.value = 1;
-              nextDrawTime.value = null;
-            }
+        const todayKey = getDateKey(/* @__PURE__ */ new Date());
+        const localData = loadLotteryData();
+        if (!localData) {
+          resetDailyData();
+          return;
+        }
+        const data = { ...localData };
+        guaranteeProgress.value = Number(data.guaranteeProgress) || 0;
+        if (data.dateKey !== todayKey) {
+          data.dateKey = todayKey;
+          data.results = [];
+          data.lastDrawTime = null;
+          persistLotteryData(data);
+          todayResults.value = [];
+          canDraw.value = true;
+          remainingTimes.value = 1;
+          nextDrawTime.value = null;
+          countdownText.value = "";
+          return;
+        }
+        todayResults.value = data.results || [];
+        if (!cooldownEnabled) {
+          canDraw.value = true;
+          remainingTimes.value = 1;
+          nextDrawTime.value = null;
+          countdownText.value = "";
+          return;
+        }
+        if (data.lastDrawTime) {
+          const lastDrawTime = new Date(data.lastDrawTime);
+          const timeDiff = (/* @__PURE__ */ new Date()).getTime() - lastDrawTime.getTime();
+          const fourHours = 4 * 60 * 60 * 1e3;
+          if (timeDiff < fourHours) {
+            canDraw.value = false;
+            remainingTimes.value = 0;
+            nextDrawTime.value = lastDrawTime.getTime() + fourHours;
+          } else {
+            canDraw.value = true;
+            remainingTimes.value = 1;
+            nextDrawTime.value = null;
           }
         } else {
-          resetDailyData();
+          canDraw.value = true;
+          remainingTimes.value = 1;
+          nextDrawTime.value = null;
         }
       } catch (error) {
-        common_vendor.index.__f__("error", "at pages/index/index.vue:285", "检查抽奖状态失败:", error);
+        common_vendor.index.__f__("error", "at pages/index/index.vue:312", "检查抽奖状态失败:", error);
         resetDailyData();
       }
     }
@@ -100,19 +130,18 @@ const _sfc_defineComponent = common_vendor.defineComponent({
       nextDrawTime.value = null;
       todayResults.value = [];
       countdownText.value = "";
-      const today = formatDate(/* @__PURE__ */ new Date());
-      const data = {
-        date: today,
-        results: [],
-        // 每日重置为空数组
-        lastDrawTime: null
-      };
-      common_vendor.index.setStorageSync("lottery_data", JSON.stringify(data));
+      const data = createLotteryData();
+      guaranteeProgress.value = Number(data.guaranteeProgress) || 0;
+      persistLotteryData(data);
     }
     function startCountdown() {
-      setInterval(() => {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+      }
+      countdownTimer = setInterval(() => {
         if (nextDrawTime.value && !canDraw.value) {
-          const timeDiff = nextDrawTime.value.getTime() - (/* @__PURE__ */ new Date()).getTime();
+          const expireTime = Number(nextDrawTime.value);
+          const timeDiff = expireTime - (/* @__PURE__ */ new Date()).getTime();
           if (timeDiff <= 0) {
             canDraw.value = true;
             remainingTimes.value = 1;
@@ -127,12 +156,18 @@ const _sfc_defineComponent = common_vendor.defineComponent({
         }
       }, 1e3);
     }
+    common_vendor.onUnmounted(() => {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    });
     function startLottery() {
       if (!canDraw.value || remainingTimes.value <= 0) {
         if (countdownText.value) {
-          common_vendor.index.__f__("log", "at pages/index/index.vue:335", `抽奖冷却中，请等待 ${countdownText.value} 后再试！`);
+          common_vendor.index.__f__("log", "at pages/index/index.vue:367", `抽奖冷却中，请等待 ${countdownText.value} 后再试！`);
         } else {
-          common_vendor.index.__f__("log", "at pages/index/index.vue:337", "今日抽奖次数已用完，请明日再来！");
+          common_vendor.index.__f__("log", "at pages/index/index.vue:369", "今日抽奖次数已用完，请明日再来！");
         }
         return;
       }
@@ -145,23 +180,26 @@ const _sfc_defineComponent = common_vendor.defineComponent({
       winResult.value = result.prize;
       let spinCount = 0;
       const baseSpins = 16;
-      const currentPos = currentIndex.value === -1 ? 0 : currentIndex.value;
+      const currentPos = currentIndex.value;
       const targetPos = winnerIndex.value;
-      const stepsToTarget = targetPos >= currentPos ? targetPos - currentPos : 8 - currentPos + targetPos;
+      const stepsToTarget = ((targetPos - currentPos) % 8 + 8) % 8;
       const totalSpins = baseSpins + stepsToTarget;
       const spinInterval = setInterval(() => {
         currentIndex.value = (currentIndex.value + 1) % 8;
         spinCount++;
-        if (spinCount >= totalSpins + 1) {
+        if (spinCount >= totalSpins) {
           clearInterval(spinInterval);
           setTimeout(() => {
             isSpinning.value = false;
             showResult.value = true;
             showResultModal.value = true;
             saveLotteryResult(result);
-            canDraw.value = false;
-            remainingTimes.value = 0;
-            nextDrawTime.value = new Date((/* @__PURE__ */ new Date()).getTime() + 4 * 60 * 60 * 1e3);
+            {
+              canDraw.value = true;
+              remainingTimes.value = 1;
+              nextDrawTime.value = null;
+              countdownText.value = "";
+            }
           }, 500);
         }
       }, 100);
@@ -175,8 +213,6 @@ const _sfc_defineComponent = common_vendor.defineComponent({
         selectedType = "cash5";
       } else if (random < prizeProbabilities.free + prizeProbabilities.cash5 + prizeProbabilities.cash3) {
         selectedType = "cash3";
-      } else if (random < prizeProbabilities.free + prizeProbabilities.cash5 + prizeProbabilities.cash3 + prizeProbabilities.cash2) {
-        selectedType = "cash2";
       } else {
         selectedType = "paid";
       }
@@ -211,7 +247,13 @@ const _sfc_defineComponent = common_vendor.defineComponent({
         }
       };
     }
-    function formatDate(date) {
+    function getDateKey(date) {
+      const year = date.getFullYear();
+      const month = (date.getMonth() + 1).toString().padStart(2, "0");
+      const day = date.getDate().toString().padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    function formatDateTime(date) {
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
       const day = date.getDate();
@@ -220,49 +262,132 @@ const _sfc_defineComponent = common_vendor.defineComponent({
       const second = date.getSeconds().toString().padStart(2, "0");
       return `${year}/${month}/${day} ${hour}:${minute}:${second}`;
     }
+    function createLotteryData(existingData = {}) {
+      return {
+        dateKey: getDateKey(/* @__PURE__ */ new Date()),
+        results: [],
+        lastDrawTime: null,
+        guaranteeProgress: 0,
+        guaranteeRewardCount: 0,
+        ...existingData
+      };
+    }
+    function loadLotteryData() {
+      const localData = common_vendor.index.getStorageSync("lottery_data");
+      if (!localData)
+        return null;
+      if (typeof localData === "string") {
+        try {
+          return JSON.parse(localData);
+        } catch (error) {
+          common_vendor.index.__f__("error", "at pages/index/index.vue:514", "解析本地抽奖数据失败:", error);
+          return null;
+        }
+      }
+      return localData;
+    }
+    function persistLotteryData(data) {
+      common_vendor.index.setStorageSync("lottery_data", JSON.stringify(data));
+    }
     function saveLotteryResult(result) {
       try {
-        const today = formatDate(/* @__PURE__ */ new Date());
-        const lotteryData = common_vendor.index.getStorageSync("lottery_data");
-        let data = {
-          date: today,
-          results: [],
-          lastDrawTime: null
-        };
-        if (lotteryData) {
-          const existingData = JSON.parse(lotteryData);
-          if (existingData.date === today) {
-            data = existingData;
-          }
+        const todayKey = getDateKey(/* @__PURE__ */ new Date());
+        const localData = loadLotteryData();
+        const data = createLotteryData(localData || {});
+        if (data.dateKey !== todayKey) {
+          data.dateKey = todayKey;
+          data.results = [];
+          data.lastDrawTime = null;
         }
         const newResult = {
           icon: result.prize.icon,
-          // 使用奖品的正确图标
           name: result.prize.name,
           type: result.prize.type,
           amount: result.amount || 0,
-          time: (/* @__PURE__ */ new Date()).toLocaleString(),
+          time: formatDateTime(/* @__PURE__ */ new Date()),
           timestamp: (/* @__PURE__ */ new Date()).getTime()
         };
         data.results = [newResult];
-        data.lastDrawTime = (/* @__PURE__ */ new Date()).toISOString();
-        common_vendor.index.setStorageSync("lottery_data", JSON.stringify(data));
+        data.lastDrawTime = cooldownEnabled ? (/* @__PURE__ */ new Date()).toISOString() : null;
+        if (result.prize.type === "free") {
+          data.guaranteeProgress = 0;
+        } else {
+          data.guaranteeProgress = Math.min((Number(data.guaranteeProgress) || 0) + 1, guaranteeTarget);
+        }
+        persistLotteryData(data);
         todayResults.value = data.results;
+        guaranteeProgress.value = Number(data.guaranteeProgress) || 0;
         const historyRecord = {
           ...newResult,
-          isFree: result.type === "none" ? false : true
+          isFree: result.prize.type === "free"
         };
         lotteryHistory.value.push(historyRecord);
-        common_vendor.index.__f__("log", "at pages/index/index.vue:506", "🎲 抽奖结果记录:", {
+        common_vendor.index.__f__("log", "at pages/index/index.vue:561", "🎲 抽奖结果记录:", {
           时间: historyRecord.time,
           结果: historyRecord.name,
-          类型: historyRecord.type === "money" ? "红包奖励" : "谢谢参与",
+          类型: historyRecord.type === "paid" ? "谢谢参与" : "奖励中奖",
           金额: historyRecord.amount || 0,
           图标: historyRecord.icon
         });
       } catch (error) {
-        common_vendor.index.__f__("error", "at pages/index/index.vue:514", "保存抽奖结果失败:", error);
+        common_vendor.index.__f__("error", "at pages/index/index.vue:569", "保存抽奖结果失败:", error);
       }
+    }
+    function claimGuaranteeReward() {
+      if (!guaranteeReady.value) {
+        showToast(`再抽 ${guaranteeTarget - guaranteeProgress.value} 次即可触发保底`);
+        return;
+      }
+      if (isSpinning.value)
+        return;
+      if (!canDraw.value || remainingTimes.value <= 0) {
+        if (countdownText.value) {
+          showToast(`当前冷却中，${countdownText.value} 后可领奖`);
+        } else {
+          showToast("当前不可领奖，请稍后再试");
+        }
+        return;
+      }
+      const data = createLotteryData(loadLotteryData() || {});
+      const now = /* @__PURE__ */ new Date();
+      data.dateKey = getDateKey(now);
+      data.guaranteeProgress = 0;
+      data.guaranteeRewardCount = (Number(data.guaranteeRewardCount) || 0) + 1;
+      data.lastDrawTime = null;
+      data.results = [{
+        icon: "🎁",
+        name: "清空购物车",
+        type: "free",
+        amount: 0,
+        time: formatDateTime(now),
+        timestamp: now.getTime(),
+        fromGuarantee: true
+      }];
+      persistLotteryData(data);
+      guaranteeProgress.value = 0;
+      todayResults.value = data.results;
+      winnerIndex.value = 5;
+      showResult.value = true;
+      winResult.value = {
+        icon: "🎁",
+        title: "🎉保底触发成功!",
+        description: "恭喜获得清空购物车奖励"
+      };
+      showResultModal.value = true;
+      {
+        canDraw.value = true;
+        remainingTimes.value = 1;
+        nextDrawTime.value = null;
+        countdownText.value = "";
+        showToast("保底奖励领取成功");
+      }
+    }
+    function showToast(message) {
+      common_vendor.index.showToast({
+        title: message,
+        icon: "none",
+        duration: 2e3
+      });
     }
     function closeResultModal() {
       showResultModal.value = false;
@@ -296,74 +421,79 @@ const _sfc_defineComponent = common_vendor.defineComponent({
         e: common_vendor.t(prizeProbabilities.cash5),
         f: common_vendor.t(prizeProbabilities.cash3),
         g: common_vendor.t(prizeProbabilities.paid - 2),
-        h: common_assets._imports_0,
-        i: common_vendor.f(luckTexts.value, (text, index, i0) => {
+        h: common_vendor.t(guaranteeProgress.value),
+        i: common_vendor.t(guaranteeTarget),
+        j: guaranteeRingBg.value,
+        k: common_vendor.o(claimGuaranteeReward),
+        l: guaranteeReady.value ? 1 : "",
+        m: common_assets._imports_0,
+        n: common_vendor.f(luckTexts.value, (text, index, i0) => {
           return {
             a: common_vendor.t(text.content),
             b: text.id,
             c: index * 0.1 + "s"
           };
         }),
-        j: common_vendor.o(tapBeast),
-        k: beastTapped.value ? 1 : "",
-        l: common_vendor.t(prizes.value[0].icon),
-        m: common_vendor.t(prizes.value[0].name),
-        n: currentIndex.value === 0 && isSpinning.value ? 1 : "",
-        o: winnerIndex.value === 0 && showResult.value ? 1 : "",
-        p: common_vendor.t(prizes.value[1].icon),
-        q: common_vendor.t(prizes.value[1].name),
-        r: currentIndex.value === 1 && isSpinning.value ? 1 : "",
-        s: winnerIndex.value === 1 && showResult.value ? 1 : "",
-        t: common_vendor.t(prizes.value[2].icon),
-        v: common_vendor.t(prizes.value[2].name),
-        w: currentIndex.value === 2 && isSpinning.value ? 1 : "",
-        x: winnerIndex.value === 2 && showResult.value ? 1 : "",
-        y: common_vendor.t(prizes.value[7].icon),
-        z: common_vendor.t(prizes.value[7].name),
-        A: currentIndex.value === 7 && isSpinning.value ? 1 : "",
-        B: winnerIndex.value === 7 && showResult.value ? 1 : "",
-        C: !canDraw.value && countdownText.value
+        o: common_vendor.o(tapBeast),
+        p: beastTapped.value ? 1 : "",
+        q: common_vendor.t(prizes.value[0].icon),
+        r: common_vendor.t(prizes.value[0].name),
+        s: currentIndex.value === 0 && isSpinning.value ? 1 : "",
+        t: winnerIndex.value === 0 && showResult.value ? 1 : "",
+        v: common_vendor.t(prizes.value[1].icon),
+        w: common_vendor.t(prizes.value[1].name),
+        x: currentIndex.value === 1 && isSpinning.value ? 1 : "",
+        y: winnerIndex.value === 1 && showResult.value ? 1 : "",
+        z: common_vendor.t(prizes.value[2].icon),
+        A: common_vendor.t(prizes.value[2].name),
+        B: currentIndex.value === 2 && isSpinning.value ? 1 : "",
+        C: winnerIndex.value === 2 && showResult.value ? 1 : "",
+        D: common_vendor.t(prizes.value[7].icon),
+        E: common_vendor.t(prizes.value[7].name),
+        F: currentIndex.value === 7 && isSpinning.value ? 1 : "",
+        G: winnerIndex.value === 7 && showResult.value ? 1 : "",
+        H: !canDraw.value && countdownText.value
       }, !canDraw.value && countdownText.value ? {
-        D: common_vendor.t(countdownText.value)
+        I: common_vendor.t(countdownText.value)
       } : !canDraw.value ? {} : isSpinning.value ? {} : {}, {
-        E: !canDraw.value,
-        F: isSpinning.value,
-        G: common_vendor.t(remainingTimes.value),
-        H: common_vendor.o(startLottery),
-        I: !canDraw.value || isSpinning.value,
-        J: common_vendor.t(prizes.value[3].icon),
-        K: common_vendor.t(prizes.value[3].name),
-        L: currentIndex.value === 3 && isSpinning.value ? 1 : "",
-        M: winnerIndex.value === 3 && showResult.value ? 1 : "",
-        N: common_vendor.t(prizes.value[6].icon),
-        O: common_vendor.t(prizes.value[6].name),
-        P: currentIndex.value === 6 && isSpinning.value ? 1 : "",
-        Q: winnerIndex.value === 6 && showResult.value ? 1 : "",
-        R: common_vendor.t(prizes.value[5].icon),
-        S: common_vendor.t(prizes.value[5].name),
-        T: currentIndex.value === 5 && isSpinning.value ? 1 : "",
-        U: winnerIndex.value === 5 && showResult.value ? 1 : "",
-        V: common_vendor.t(prizes.value[4].icon),
-        W: common_vendor.t(prizes.value[4].name),
-        X: currentIndex.value === 4 && isSpinning.value ? 1 : "",
-        Y: winnerIndex.value === 4 && showResult.value ? 1 : "",
-        Z: todayResults.value.length > 0
+        J: !canDraw.value,
+        K: isSpinning.value,
+        L: common_vendor.t(remainingTimes.value),
+        M: common_vendor.o(startLottery),
+        N: !canDraw.value || isSpinning.value,
+        O: common_vendor.t(prizes.value[3].icon),
+        P: common_vendor.t(prizes.value[3].name),
+        Q: currentIndex.value === 3 && isSpinning.value ? 1 : "",
+        R: winnerIndex.value === 3 && showResult.value ? 1 : "",
+        S: common_vendor.t(prizes.value[6].icon),
+        T: common_vendor.t(prizes.value[6].name),
+        U: currentIndex.value === 6 && isSpinning.value ? 1 : "",
+        V: winnerIndex.value === 6 && showResult.value ? 1 : "",
+        W: common_vendor.t(prizes.value[5].icon),
+        X: common_vendor.t(prizes.value[5].name),
+        Y: currentIndex.value === 5 && isSpinning.value ? 1 : "",
+        Z: winnerIndex.value === 5 && showResult.value ? 1 : "",
+        aa: common_vendor.t(prizes.value[4].icon),
+        ab: common_vendor.t(prizes.value[4].name),
+        ac: currentIndex.value === 4 && isSpinning.value ? 1 : "",
+        ad: winnerIndex.value === 4 && showResult.value ? 1 : "",
+        ae: todayResults.value.length > 0
       }, todayResults.value.length > 0 ? {
-        aa: common_vendor.t(todayResults.value[0].icon),
-        ab: common_vendor.t(todayResults.value[0].name)
+        af: common_vendor.t(todayResults.value[0].icon),
+        ag: common_vendor.t(todayResults.value[0].name)
       } : {}, {
-        ac: showResultModal.value
+        ah: showResultModal.value
       }, showResultModal.value ? {
-        ad: common_vendor.t(winResult.value.icon),
-        ae: common_vendor.t(winResult.value.title),
-        af: common_vendor.t(winResult.value.description),
-        ag: common_vendor.o(closeResultModal),
-        ah: common_vendor.o(() => {
+        ai: common_vendor.t(winResult.value.icon),
+        aj: common_vendor.t(winResult.value.title),
+        ak: common_vendor.t(winResult.value.description),
+        al: common_vendor.o(closeResultModal),
+        am: common_vendor.o(() => {
         }),
-        ai: common_vendor.o(closeResultModal)
+        an: common_vendor.o(closeResultModal)
       } : {}, {
-        aj: !pageLoading.value,
-        ak: common_vendor.n(pcFlag.value ? "activity-pc" : "")
+        ao: !pageLoading.value,
+        ap: common_vendor.n(pcFlag.value ? "activity-pc" : "")
       });
     };
   }

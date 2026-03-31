@@ -90,7 +90,7 @@
   align-items: center;
   justify-content: center;
 }
-.banner-title h1.data-v-1cf27b2a {
+.banner-title h2.data-v-1cf27b2a {
   font-size: 56rpx;
   font-weight: bold;
   color: #000;
@@ -340,7 +340,7 @@
   transform: none;
 }
 .today-result.data-v-1cf27b2a {
-  background: white;
+  background: rgba(255, 255, 255, 0.95);
   border-radius: 24rpx;
   padding: 30rpx;
   text-align: center;
@@ -432,6 +432,49 @@
   margin-top: 40rpx;
   transition: all 0.3s ease;
 }
+.guarantee-float.data-v-1cf27b2a {
+  position: fixed;
+  top: 40%;
+  left: 10rpx;
+  width: 148rpx;
+  height: 148rpx;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.guarantee-ring.data-v-1cf27b2a {
+  width: 74rpx;
+  height: 74rpx;
+  border-radius: 50%;
+  padding: 8rpx;
+  box-shadow: 0 8rpx 20rpx rgba(255, 122, 69, 0.35);
+}
+.guarantee-inner.data-v-1cf27b2a {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.guarantee-progress.data-v-1cf27b2a {
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.guarantee-title.data-v-1cf27b2a {
+  margin-top: 6rpx;
+  font-size: 18rpx;
+  opacity: 0.92;
+}
+.guarantee-float.ready .guarantee-ring.data-v-1cf27b2a {
+  box-shadow: 0 0 18rpx rgba(255, 227, 122, 0.95), 0 0 36rpx rgba(255, 227, 122, 0.7);
+  animation: guaranteeGlow-1cf27b2a 1.3s ease-in-out infinite;
+}
 
 /* 悬浮木鱼样式 */
 .floating-beast.data-v-1cf27b2a {
@@ -491,7 +534,15 @@
     transform: translateY(0px);
 }
 50% {
-    transform: translateY(-3px);
+    transform: translateY(-4px);
+}
+}
+@keyframes guaranteeGlow-1cf27b2a {
+0%, 100% {
+    transform: scale(1);
+}
+50% {
+    transform: scale(1.04);
 }
 }
 /* 神兽图标跳动动画 */

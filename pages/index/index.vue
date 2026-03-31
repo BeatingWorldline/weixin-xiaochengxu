@@ -36,6 +36,15 @@
       </div>
     </div>
     
+    <div class="guarantee-float" @click="claimGuaranteeReward" :class="{ ready: guaranteeReady }">
+      <div class="guarantee-ring" :style="{ background: guaranteeRingBg }">
+        <div class="guarantee-inner">
+          <div class="guarantee-progress">{{ guaranteeProgress }}/{{ guaranteeTarget }}</div>
+          <div class="guarantee-title">大保底</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 悬浮木鱼 -->
     <div class="floating-beast" @click="tapBeast" :class="{ 'tapped': beastTapped }">
 		<div class="beast-icon">
@@ -177,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { onShareAppMessage } from '@dcloudio/uni-app'
 
 // 响应式数据
@@ -202,6 +211,16 @@ const beastTapped = ref(false)
 const luckTexts = ref([])
 const luckCount = ref(0)
 let luckTextId = 0
+const guaranteeTarget = 30
+const cooldownEnabled = false
+const guaranteeProgress = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+const guaranteeReady = computed(() => guaranteeProgress.value >= guaranteeTarget)
+const guaranteePercent = computed(() => Math.min(guaranteeProgress.value / guaranteeTarget, 1))
+const guaranteeRingBg = computed(() => {
+  const activeColor = guaranteeReady.value ? '#ffe37a' : '#ff7a45'
+  return `conic-gradient(${activeColor} ${guaranteePercent.value * 360}deg, rgba(255,255,255,0.25) 0deg)`
+})
 
 // 奖品配置（八个奖品围绕中央按钮，按指定位置排列）
 const prizes = ref([
@@ -236,50 +255,58 @@ onMounted(() => {
 onShareAppMessage(()=>{
 	return {
 	  title: '抽奖赢免单',
-	  path: '/pages/index/inde',
+	  path: '/pages/index/index',
 	  imageUrl:'https://imgs.3dmgame.com/community/402ee1ae5daf455c99eb3c31c3c14f7d11762507624256.png'
 	}
 })
 
-// 检查抽奖状态（四小时间隔）
 function checkLotteryStatus() {
   try {
-    
-    const today = formatDate(new Date())
-    // const lotteryData = localStorage.getItem('lottery_data')  VUE原生JS写法
-    const lotteryData = uni.getStorageSync('lottery_data')  // 	 迁移uniapp写法
-    
-    if (lotteryData) {
-      const data = JSON.parse(lotteryData)
-      
-      // 如果不是今天的数据，重置所有状态
-      if (data.date !== today) {
-        resetDailyData()
-        return
-      }
-      
-      // 加载今日抽奖记录
-      todayResults.value = data.results || []
-      
-      // 检查是否可以抽奖
-      if (data.lastDrawTime) {
-        const lastDrawTime = new Date(data.lastDrawTime)
-        const timeDiff = new Date().getTime() - lastDrawTime.getTime()
-        const fourHours = 4 * 60 * 60 * 1000 // 4小时的毫秒数
-        
-        if (timeDiff < fourHours) {
-          canDraw.value = false
-          remainingTimes.value = 0
-          nextDrawTime.value = new Date(lastDrawTime.getTime() + fourHours)
-        } else {
-          canDraw.value = true
-          remainingTimes.value = 1
-          nextDrawTime.value = null
-        }
+    const todayKey = getDateKey(new Date())
+    const localData = loadLotteryData()
+    if (!localData) {
+      resetDailyData()
+      return
+    }
+    const data = { ...localData }
+    guaranteeProgress.value = Number(data.guaranteeProgress) || 0
+    if (data.dateKey !== todayKey) {
+      data.dateKey = todayKey
+      data.results = []
+      data.lastDrawTime = null
+      persistLotteryData(data)
+      todayResults.value = []
+      canDraw.value = true
+      remainingTimes.value = 1
+      nextDrawTime.value = null
+      countdownText.value = ''
+      return
+    }
+    todayResults.value = data.results || []
+    if (!cooldownEnabled) {
+      canDraw.value = true
+      remainingTimes.value = 1
+      nextDrawTime.value = null
+      countdownText.value = ''
+      return
+    }
+    if (data.lastDrawTime) {
+      const lastDrawTime = new Date(data.lastDrawTime)
+      const timeDiff = new Date().getTime() - lastDrawTime.getTime()
+      const fourHours = 4 * 60 * 60 * 1000
+      if (timeDiff < fourHours) {
+        canDraw.value = false
+        remainingTimes.value = 0
+        nextDrawTime.value = lastDrawTime.getTime() + fourHours
+      } else {
+        canDraw.value = true
+        remainingTimes.value = 1
+        nextDrawTime.value = null
       }
     } else {
-      // 首次使用，初始化数据
-      resetDailyData()
+      canDraw.value = true
+      remainingTimes.value = 1
+      nextDrawTime.value = null
     }
   } catch (error) {
     console.error('检查抽奖状态失败:', error)
@@ -294,22 +321,20 @@ function resetDailyData() {
   nextDrawTime.value = null
   todayResults.value = []
   countdownText.value = ''
-  
-  const today = formatDate(new Date())
-  const data = {
-    date: today,
-    results: [], // 每日重置为空数组
-    lastDrawTime: null
-  }
-  uni.setStorageSync('lottery_data', JSON.stringify(data))
+  const data = createLotteryData()
+  guaranteeProgress.value = Number(data.guaranteeProgress) || 0
+  persistLotteryData(data)
 }
 
 // 开始倒计时
 function startCountdown() {
-  setInterval(() => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+  }
+  countdownTimer = setInterval(() => {
     if (nextDrawTime.value && !canDraw.value) {
-      const now = new Date()
-      const timeDiff = nextDrawTime.value.getTime() - new Date().getTime()
+      const expireTime = Number(nextDrawTime.value)
+      const timeDiff = expireTime - new Date().getTime()
       
       if (timeDiff <= 0) {
         // 倒计时结束，可以抽奖了
@@ -327,6 +352,13 @@ function startCountdown() {
     }
   }, 1000)
 }
+
+onUnmounted(() => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+})
 
 // 开始抽奖
 function startLottery() {
@@ -353,9 +385,9 @@ function startLottery() {
   let spinCount = 0
   const baseSpins = 16 // 基础转动次数（2圈）
   // 计算从当前位置到目标位置需要的步数
-  const currentPos = currentIndex.value === -1 ? 0 : currentIndex.value
+  const currentPos = currentIndex.value
   const targetPos = winnerIndex.value
-  const stepsToTarget = targetPos >= currentPos ? targetPos - currentPos : 8 - currentPos + targetPos
+  const stepsToTarget = ((targetPos - currentPos) % 8 + 8) % 8
   
   const totalSpins = baseSpins + stepsToTarget
   
@@ -363,7 +395,7 @@ function startLottery() {
     currentIndex.value = (currentIndex.value + 1) % 8
     spinCount++
     
-    if (spinCount >= totalSpins + 1) {
+    if (spinCount >= totalSpins) {
       clearInterval(spinInterval)
       // 此时currentIndex已经自然停在winnerIndex位置
       
@@ -373,11 +405,16 @@ function startLottery() {
           showResultModal.value = true
           saveLotteryResult(result)
           
-          // 更新抽奖状态
-          canDraw.value = false
-          remainingTimes.value = 0
-          const now = new Date()
-          nextDrawTime.value = new Date(new Date().getTime() + 4 * 60 * 60 * 1000) // 4小时后
+          if (cooldownEnabled) {
+            canDraw.value = false
+            remainingTimes.value = 0
+            nextDrawTime.value = new Date().getTime() + 4 * 60 * 60 * 1000
+          } else {
+            canDraw.value = true
+            remainingTimes.value = 1
+            nextDrawTime.value = null
+            countdownText.value = ''
+          }
         }, 500)
     }
   }, 100)
@@ -395,8 +432,6 @@ function generateLotteryResult() {
     selectedType = 'cash5'
   } else if (random < prizeProbabilities.free + prizeProbabilities.cash5 + prizeProbabilities.cash3) {
     selectedType = 'cash3'
-  } else if (random < prizeProbabilities.free + prizeProbabilities.cash5 + prizeProbabilities.cash3 + prizeProbabilities.cash2) {
-    selectedType = 'cash2'
   } else {
     selectedType = 'paid'
   }
@@ -441,64 +476,84 @@ function generateLotteryResult() {
   }
 }
 
-// 自定义格式化函数 格式化规则不交给​​不确定的运行环境
-function formatDate(date) {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1; // 月份从0开始，要加1
-  const day = date.getDate();
-  const hour = date.getHours();
-  const minute = date.getMinutes().toString().padStart(2, '0'); // 补零
-  const second = date.getSeconds().toString().padStart(2, '0');
+function getDateKey(date) {
+  const year = date.getFullYear()
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
-  // 拼接成您需要的格式，例如 "2025/11/7 15:54:36"
-  return `${year}/${month}/${day} ${hour}:${minute}:${second}`;
+function formatDateTime(date) {
+  const year = date.getFullYear()
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+  const hour = date.getHours()
+  const minute = date.getMinutes().toString().padStart(2, '0')
+  const second = date.getSeconds().toString().padStart(2, '0')
+  return `${year}/${month}/${day} ${hour}:${minute}:${second}`
+}
+
+function createLotteryData(existingData = {}) {
+  return {
+    dateKey: getDateKey(new Date()),
+    results: [],
+    lastDrawTime: null,
+    guaranteeProgress: 0,
+    guaranteeRewardCount: 0,
+    ...existingData
+  }
+}
+
+function loadLotteryData() {
+  const localData = uni.getStorageSync('lottery_data')
+  if (!localData) return null
+  if (typeof localData === 'string') {
+    try {
+      return JSON.parse(localData)
+    } catch (error) {
+      console.error('解析本地抽奖数据失败:', error)
+      return null
+    }
+  }
+  return localData
+}
+
+function persistLotteryData(data) {
+  uni.setStorageSync('lottery_data', JSON.stringify(data))
 }
 
 // 保存抽奖结果
 function saveLotteryResult(result) {
   try {
-    const today = formatDate(new Date())
-    
-    // 获取现有数据
-    const lotteryData = uni.getStorageSync("lottery_data")
-    let data = {
-      date: today,
-      results: [],
-      lastDrawTime: null
+    const todayKey = getDateKey(new Date())
+    const localData = loadLotteryData()
+    const data = createLotteryData(localData || {})
+    if (data.dateKey !== todayKey) {
+      data.dateKey = todayKey
+      data.results = []
+      data.lastDrawTime = null
     }
-    
-    if (lotteryData) {
-      const existingData = JSON.parse(lotteryData)
-      if (existingData.date === today) {
-        data = existingData
-      }
-    }
-    
-    // 添加新的抽奖结果（只保留最后一次）
     const newResult = {
-      icon: result.prize.icon, // 使用奖品的正确图标
+      icon: result.prize.icon,
       name: result.prize.name,
       type: result.prize.type,
       amount: result.amount || 0,
-      time: new Date().toLocaleString(),
+      time: formatDateTime(new Date()),
       timestamp: new Date().getTime()
     }
-    
-    // 只保留最后一次抽奖结果
     data.results = [newResult]
-    data.lastDrawTime = new Date().toISOString()
-    
-    // 保存到本地存储
-    // localStorage.setItem('lottery_data', JSON.stringify(data))
-	uni.setStorageSync('lottery_data', JSON.stringify(data))
-    
-    // 更新页面状态
+    data.lastDrawTime = cooldownEnabled ? new Date().toISOString() : null
+    if (result.prize.type === 'free') {
+      data.guaranteeProgress = 0
+    } else {
+      data.guaranteeProgress = Math.min((Number(data.guaranteeProgress) || 0) + 1, guaranteeTarget)
+    }
+    persistLotteryData(data)
     todayResults.value = data.results
-    
-    // 记录到历史记录
+    guaranteeProgress.value = Number(data.guaranteeProgress) || 0
     const historyRecord = {
       ...newResult,
-      isFree: result.type === 'none' ? false : true
+      isFree: result.prize.type === 'free'
     }
     lotteryHistory.value.push(historyRecord)
     
@@ -506,7 +561,7 @@ function saveLotteryResult(result) {
     console.log('🎲 抽奖结果记录:', {
       时间: historyRecord.time,
       结果: historyRecord.name,
-      类型: historyRecord.type === 'money' ? '红包奖励' : '谢谢参与',
+      类型: historyRecord.type === 'paid' ? '谢谢参与' : '奖励中奖',
       金额: historyRecord.amount || 0,
       图标: historyRecord.icon
     })
@@ -515,12 +570,69 @@ function saveLotteryResult(result) {
   }
 }
 
+function claimGuaranteeReward() {
+  if (!guaranteeReady.value) {
+    showToast(`再抽 ${guaranteeTarget - guaranteeProgress.value} 次即可触发保底`)
+    return
+  }
+  if (isSpinning.value) return
+  if (!canDraw.value || remainingTimes.value <= 0) {
+    if (countdownText.value) {
+      showToast(`当前冷却中，${countdownText.value} 后可领奖`)
+    } else {
+      showToast('当前不可领奖，请稍后再试')
+    }
+    return
+  }
+  const data = createLotteryData(loadLotteryData() || {})
+  const now = new Date()
+  data.dateKey = getDateKey(now)
+  data.guaranteeProgress = 0
+  data.guaranteeRewardCount = (Number(data.guaranteeRewardCount) || 0) + 1
+  data.lastDrawTime = cooldownEnabled ? now.toISOString() : null
+  data.results = [{
+    icon: '🎁',
+    name: '清空购物车',
+    type: 'free',
+    amount: 0,
+    time: formatDateTime(now),
+    timestamp: now.getTime(),
+    fromGuarantee: true
+  }]
+  persistLotteryData(data)
+  guaranteeProgress.value = 0
+  todayResults.value = data.results
+  winnerIndex.value = 5
+  showResult.value = true
+  winResult.value = {
+    icon: '🎁',
+    title: '🎉保底触发成功!',
+    description: '恭喜获得清空购物车奖励'
+  }
+  showResultModal.value = true
+  if (cooldownEnabled) {
+    canDraw.value = false
+    remainingTimes.value = 0
+    nextDrawTime.value = now.getTime() + 4 * 60 * 60 * 1000
+    showToast('已消耗一次抽奖机会，进入冷却')
+  } else {
+    canDraw.value = true
+    remainingTimes.value = 1
+    nextDrawTime.value = null
+    countdownText.value = ''
+    showToast('保底奖励领取成功')
+  }
+}
+
 
 
 // 显示提示信息
 function showToast(message) {
-  // 简单的提示实现，可以根据项目需要替换为更好的提示组件
-  alert(message)
+  uni.showToast({
+    title: message,
+    icon: 'none',
+    duration: 2000
+  })
 }
 
 // 关闭结果弹窗
@@ -634,7 +746,7 @@ function tapBeast() {
   justify-content: center;
 }
 
-.banner-title h1 {
+.banner-title h2 {
   font-size: 56rpx;
   font-weight: bold;
   color: #000;
@@ -894,7 +1006,7 @@ function tapBeast() {
   transform: none;
 }
 .today-result {
-  background: rgba(255, 255, 2555);
+  background: rgba(255, 255, 255, 0.95);
   border-radius: 24rpx;
   padding: 30rpx;
   text-align: center;
@@ -999,6 +1111,55 @@ function tapBeast() {
   transition: all 0.3s ease;
 }
 
+.guarantee-float {
+  position: fixed;
+  top: 40%;
+  left: 10rpx;
+  width: 148rpx;
+  height: 148rpx;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.guarantee-ring {
+  width: 74rpx;
+  height: 74rpx;
+  border-radius: 50%;
+  padding: 8rpx;
+  box-shadow: 0 8rpx 20rpx rgba(255, 122, 69, 0.35);
+}
+
+.guarantee-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.guarantee-progress {
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.guarantee-title {
+  margin-top: 6rpx;
+  font-size: 18rpx;
+  opacity: 0.92;
+}
+
+.guarantee-float.ready .guarantee-ring {
+  box-shadow: 0 0 18rpx rgba(255, 227, 122, 0.95), 0 0 36rpx rgba(255, 227, 122, 0.7);
+  animation: guaranteeGlow 1.3s ease-in-out infinite;
+}
+
 /* 悬浮木鱼样式 */
 .floating-beast {
   position: fixed;
@@ -1062,7 +1223,17 @@ function tapBeast() {
     transform: translateY(0px);
   }
   50% {
-    transform: translateY(-3px);
+    transform: translateY(-4px);
+  }
+}
+
+
+@keyframes guaranteeGlow {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
   }
 }
 
