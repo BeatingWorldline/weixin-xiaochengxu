@@ -5,8 +5,8 @@ if (!Array) {
   const _component_van_loading = common_vendor.resolveComponent("van-loading");
   _component_van_loading();
 }
-const guaranteeTarget = 30;
-const cooldownEnabled = false;
+const guaranteeTarget = 18;
+const cooldownEnabled = true;
 const _sfc_defineComponent = common_vendor.defineComponent({
   __name: "index",
   setup(__props) {
@@ -94,21 +94,16 @@ const _sfc_defineComponent = common_vendor.defineComponent({
           return;
         }
         todayResults.value = data.results || [];
-        if (!cooldownEnabled) {
-          canDraw.value = true;
-          remainingTimes.value = 1;
-          nextDrawTime.value = null;
-          countdownText.value = "";
-          return;
-        }
+        if (!cooldownEnabled)
+          ;
         if (data.lastDrawTime) {
           const lastDrawTime = new Date(data.lastDrawTime);
           const timeDiff = (/* @__PURE__ */ new Date()).getTime() - lastDrawTime.getTime();
-          const fourHours = 4 * 60 * 60 * 1e3;
-          if (timeDiff < fourHours) {
+          const eightHours = 8 * 60 * 60 * 1e3;
+          if (timeDiff < eightHours) {
             canDraw.value = false;
             remainingTimes.value = 0;
-            nextDrawTime.value = lastDrawTime.getTime() + fourHours;
+            nextDrawTime.value = lastDrawTime.getTime() + eightHours;
           } else {
             canDraw.value = true;
             remainingTimes.value = 1;
@@ -195,10 +190,9 @@ const _sfc_defineComponent = common_vendor.defineComponent({
             showResultModal.value = true;
             saveLotteryResult(result);
             {
-              canDraw.value = true;
-              remainingTimes.value = 1;
-              nextDrawTime.value = null;
-              countdownText.value = "";
+              canDraw.value = false;
+              remainingTimes.value = 0;
+              nextDrawTime.value = (/* @__PURE__ */ new Date()).getTime() + 8 * 60 * 60 * 1e3;
             }
           }, 500);
         }
@@ -353,7 +347,7 @@ const _sfc_defineComponent = common_vendor.defineComponent({
       data.dateKey = getDateKey(now);
       data.guaranteeProgress = 0;
       data.guaranteeRewardCount = (Number(data.guaranteeRewardCount) || 0) + 1;
-      data.lastDrawTime = null;
+      data.lastDrawTime = now.toISOString();
       data.results = [{
         icon: "🎁",
         name: "清空购物车",
@@ -375,11 +369,10 @@ const _sfc_defineComponent = common_vendor.defineComponent({
       };
       showResultModal.value = true;
       {
-        canDraw.value = true;
-        remainingTimes.value = 1;
-        nextDrawTime.value = null;
-        countdownText.value = "";
-        showToast("保底奖励领取成功");
+        canDraw.value = false;
+        remainingTimes.value = 0;
+        nextDrawTime.value = now.getTime() + 8 * 60 * 60 * 1e3;
+        showToast("已消耗一次抽奖机会，进入冷却");
       }
     }
     function showToast(message) {

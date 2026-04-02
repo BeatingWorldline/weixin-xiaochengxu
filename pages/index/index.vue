@@ -211,8 +211,8 @@ const beastTapped = ref(false)
 const luckTexts = ref([])
 const luckCount = ref(0)
 let luckTextId = 0
-const guaranteeTarget = 30
-const cooldownEnabled = false
+const guaranteeTarget = 18
+const cooldownEnabled = true
 const guaranteeProgress = ref(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 const guaranteeReady = computed(() => guaranteeProgress.value >= guaranteeTarget)
@@ -293,11 +293,11 @@ function checkLotteryStatus() {
     if (data.lastDrawTime) {
       const lastDrawTime = new Date(data.lastDrawTime)
       const timeDiff = new Date().getTime() - lastDrawTime.getTime()
-      const fourHours = 4 * 60 * 60 * 1000
-      if (timeDiff < fourHours) {
+      const eightHours = 8 * 60 * 60 * 1000
+      if (timeDiff < eightHours) {
         canDraw.value = false
         remainingTimes.value = 0
-        nextDrawTime.value = lastDrawTime.getTime() + fourHours
+        nextDrawTime.value = lastDrawTime.getTime() + eightHours
       } else {
         canDraw.value = true
         remainingTimes.value = 1
@@ -408,7 +408,7 @@ function startLottery() {
           if (cooldownEnabled) {
             canDraw.value = false
             remainingTimes.value = 0
-            nextDrawTime.value = new Date().getTime() + 4 * 60 * 60 * 1000
+            nextDrawTime.value = new Date().getTime() + 8 * 60 * 60 * 1000
           } else {
             canDraw.value = true
             remainingTimes.value = 1
@@ -613,7 +613,7 @@ function claimGuaranteeReward() {
   if (cooldownEnabled) {
     canDraw.value = false
     remainingTimes.value = 0
-    nextDrawTime.value = now.getTime() + 4 * 60 * 60 * 1000
+    nextDrawTime.value = now.getTime() + 8 * 60 * 60 * 1000
     showToast('已消耗一次抽奖机会，进入冷却')
   } else {
     canDraw.value = true
